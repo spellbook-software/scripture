@@ -1,38 +1,131 @@
-name: 'publish'
+name: publish
 on:
   push:
     branches:
       - main
-
 jobs:
-  publish-tauri:
+  CREATE_RELEASE:
+    runs-on: ubuntu-20.04
+    outputs:
+      releaseId: ${{ steps.CREATE_DRAFT_RELEASE.outputs.result }}
+    steps:
+      - uses: actions/checkout@v3
+      - name: setup node
+        uses: actions/setup-node@v3
+        with:
+          node-version: 16
+      - name: get node package version
+        run: echo "APP_NAME=$(node -p "require('./package.json').name")" >> $GITHUB_ENV
+      - name: create draft release
+        id: CREATE_DRAFT_RELEASE
+        uses: actions/github-script@v6
+        with:
+          script: >
+            const version = require("./package.json").version;
+            const name = require("./package.json").name;
+
+            const { data } = await github.rest.repos.createRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              tag_name: `app-v${version}`,
+              name: `${name || "App"} v${version}`,
+              body: "Take a look at the assets to download and install this app.",
+              draft: true,
+              prerelease: false,
+            });
+
+            return data.id;
+  BUILD_TAURI_APP:
+    needs: CREATE_RELEASE
     strategy:
       fail-fast: false
       matrix:
-        platform: [macos-latest, ubuntu-20.04, windows-latest]
-
+        - macos-latest
+        - ubuntu-20.04
+        - windows-latest
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v3
       - name: setup node
         uses: actions/setup-node@v3
         with:
-          node-version: 18
-      - name: install Rust stable
+          node-version: 16
+      - name: setup Rust stable
         uses: dtolnay/rust-toolchain@stable
       - name: install dependencies (ubuntu only)
-        if: matrix.platform == 'ubuntu-20.04'
-        run: |
+        if: matrix.platform == ubuntu-20.04
+        run: >-
           sudo apt-get update
+
           sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.0-dev libappindicator3-dev librsvg2-dev patchelf
-      - name: install app dependencies and build it
+      - name: install yarn dependencies and run yarn build
         run: yarn && yarn build
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tagName: app-v__VERSION__ # the action automatically replaces \_\_VERSION\_\_ with the app version
-          releaseName: 'App v__VERSION__'
-          releaseBody: 'See the assets to download this version and install.'
-          releaseDraft: true
-          prerelease: false
+          releaseId: ${{ needs.CREATE_RELEASE.outputs.releaseId }}
+  FINALISE_RELEASE:
+    runs-on: ubuntu-20.04
+    needs:
+      - CREATE_RELEASE
+      - BUILD_TAURI_APP
+    steps:
+      - name: finalise release
+        id: FINALISE_RELEASE
+        uses: actions/github-script@v6
+        env:
+          releaseId: ${{ needs.CREATE_RELEASE.outputs.releaseId }}
+        with:
+          script: |
+            const releaseId = process.env.releaseId;
+            if (!releaseId) {
+              throw new Error("releaseId is undefined");
+            }
+            github.rest.repos.updateRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              release_id: parseInt(releaseId),
+              draft: false,
+              prerelease: false,
+            });
+      - name: finalise release
+        id: FINALISE_RELEASE
+        uses: actions/github-script@v6
+        env:
+          releaseId: ${{ needs.CREATE_RELEASE.outputs.releaseId }}
+        with:
+          script: |
+            const releaseId = Number(core.getInput("releaseId"));
+            const versionFilename = "latest.json";
+            const assets = await github.rest.repos.listReleaseAssets({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              release_id: releaseId,
+              per_page: 50,
+            });
+            const asset = assets.data.find((e) => e.name === versionFilename);
+            if (asset) {
+              const assetData = (
+                await github.request(
+                  "GET /repos/{owner}/{repo}/releases/assets/{asset_id}",
+                  {
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    asset_id: asset.id,
+                    headers: {
+                      accept: "application/octet-stream",
+                    },
+                  }
+                )
+              ).data;
+              await github.rest.gists.create({
+                baseUrl: `/orgs/${context.repo.owner}/`,
+                public: false,
+                files: {
+                  "latest.json": {
+                    content: Buffer.from(assetData).toString(),
+                  },
+                },
+              });
+            }
