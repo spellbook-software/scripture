@@ -90,8 +90,8 @@ jobs:
               draft: false,
               prerelease: false,
             });
-      - name: finalise release
-        id: FINALISE_RELEASE
+      - name: publish version gist
+        id: PUBLISH_VERSION_GIST
         uses: actions/github-script@v6
         env:
           releaseId: ${{ needs.CREATE_RELEASE.outputs.releaseId }}
