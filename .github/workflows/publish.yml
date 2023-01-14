@@ -14,21 +14,31 @@ jobs:
         uses: actions/setup-node@v3
         with:
           node-version: 16
-      - name: get node package version
-        run: echo "APP_NAME=$(node -p "require('./package.json').name")" >> $GITHUB_ENV
+      - name: read cargo toml app name
+        uses: SebRollen/toml-action@v1.0.1
+        id: READ_TOML_APP_NAME
+        with:
+          file: ./src-tauri/Cargo.toml
+          field: package.name
+      - name: read cargo toml version
+        uses: SebRollen/toml-action@v1.0.1
+        id: READ_TOML_VERSION
+        with:
+          file: ./src-tauri/Cargo.toml
+          field: package.version
       - name: create draft release
         id: CREATE_DRAFT_RELEASE
         uses: actions/github-script@v6
+        env:
+          packageVersion: ${{ steps.READ_TOML_VERSION.outputs.value }}
+          appName: ${{ steps.READ_TOML_APP_NAME.outputs.value }}
         with:
           script: >
-            const version = require("./package.json").version;
-            const name = require("./package.json").name;
-
             const { data } = await github.rest.repos.createRelease({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              tag_name: `app-v${version}`,
-              name: `${name || "App"} v${version}`,
+              tag_name: `app-v${process.env.packageVersion}`,
+              name: `${process.env.appName || "App"} v${process.env.packageVersion}`,
               body: "Take a look at the assets to download and install this app.",
               draft: true,
               prerelease: false,
@@ -61,7 +71,7 @@ jobs:
           sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.0-dev libappindicator3-dev librsvg2-dev patchelf
       - name: install yarn dependencies and run yarn build
         run: yarn && yarn build
-      - uses: tauri-apps/tauri-action@v0
+      - uses: tauri-apps/tauri-action@dev
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
