@@ -54,7 +54,7 @@ jobs:
       - name: setup Rust stable
         uses: dtolnay/rust-toolchain@stable
       - name: install dependencies (ubuntu only)
-        if: matrix.platform == ubuntu-20.04
+        if: matrix.platform == 'ubuntu-20.04'
         run: >-
           sudo apt-get update
 
