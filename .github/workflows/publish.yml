@@ -39,10 +39,7 @@ jobs:
     needs: CREATE_RELEASE
     strategy:
       fail-fast: false
-      matrix:
-        - macos-latest
-        - ubuntu-20.04
-        - windows-latest
+      matrix: [macos-latest, ubuntu-20.04, windows-latest]
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v3
